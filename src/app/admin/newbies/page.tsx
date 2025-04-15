@@ -62,8 +62,17 @@ export default function NewbiesPage() {
     const matchesSearch = app.full_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
                          app.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
                          app.tenant_code?.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesStatus = activeTab === 'all' ? true : app.applicationStatus === activeTab;
-    return matchesSearch && matchesStatus;
+    
+    // Handle the 'all' tab case
+    if (activeTab === 'all') return matchesSearch;
+    
+    // For pending tab, show both pending and undefined status
+    if (activeTab === 'pending') {
+      return matchesSearch && (!app.applicationStatus || app.applicationStatus === 'pending');
+    }
+    
+    // For other tabs, match the exact status
+    return matchesSearch && app.applicationStatus === activeTab;
   });
 
   if (!userData?.role || userData.role !== 'admin') {
@@ -73,6 +82,9 @@ export default function NewbiesPage() {
       </div>
     );
   }
+
+  // Sort applications by date, with most recent first
+  const sortedApplications = [...filteredApplications].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 
   return (
     <div className="container mx-auto py-6 space-y-6">
@@ -104,7 +116,7 @@ export default function NewbiesPage() {
 
         <TabsContent value={activeTab} className="mt-6">
           <div className="grid gap-4">
-            {filteredApplications.map((application) => (
+            {sortedApplications.map((application) => (
               <Card key={application.id} className="hover:shadow-md transition-shadow">
                 <CardHeader>
                   <div className="flex justify-between items-start">

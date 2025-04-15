@@ -13,7 +13,6 @@ import {
   Settings, 
   Wrench, 
   Menu, 
-  Bell, 
   UserPlus,
   Clock,
   Building,
@@ -149,11 +148,11 @@ export default function AdminLayout({
           )}
           <div className="flex items-center space-x-4">
             <div className="text-sm text-muted-foreground">
-              {adminData.type.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}
+              {user?.email}
             </div>
             <Avatar>
               <AvatarImage src={user?.photoURL || undefined} />
-              <AvatarFallback>{adminData.name?.charAt(0).toUpperCase()}</AvatarFallback>
+              <AvatarFallback>{user?.email?.charAt(0).toUpperCase()}</AvatarFallback>
             </Avatar>
             <Button variant="ghost" onClick={handleLogout}>
               <LogOut className="h-4 w-4 mr-2" />

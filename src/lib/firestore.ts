@@ -327,21 +327,15 @@ export const getAllUsers = async () => {
 
 export const getPendingApplications = async () => {
   const usersRef = collection(db, USERS_COLLECTION);
-  const pendingQuery = query(
-    usersRef, 
-    where('applicationStatus', '==', 'pending')
-  );
-  const newbieQuery = query(
-    usersRef,
-    where('role', '==', 'newbie')
+  
+  // Get all users who have an applicationStatus (pending, accepted, or denied)
+  const querySnapshot = await getDocs(
+    query(usersRef, 
+      where('role', 'in', ['student', 'newbie'])
+    )
   );
 
-  const [pendingSnap, newbieSnap] = await Promise.all([
-    getDocs(pendingQuery),
-    getDocs(newbieQuery)
-  ]);
-
-  const pendingUsers = pendingSnap.docs.map(doc => {
+  const applications = querySnapshot.docs.map(doc => {
     const data = doc.data();
     return {
       id: doc.id,
@@ -355,27 +349,8 @@ export const getPendingApplications = async () => {
     } as UserData;
   });
 
-  const newbieUsers = newbieSnap.docs.map(doc => {
-    const data = doc.data();
-    return {
-      id: doc.id,
-      ...data,
-      createdAt: data.createdAt?.toDate() || new Date(),
-      updatedAt: data.updatedAt?.toDate() || new Date(),
-      communicationLog: data.communicationLog?.map((log: any) => ({
-        ...log,
-        timestamp: log.timestamp?.toDate() || new Date()
-      })) || []
-    } as UserData;
-  });
-
-  // Combine both arrays and remove duplicates based on id
-  const allPending = [...pendingUsers, ...newbieUsers];
-  const uniquePending = allPending.filter((user, index, self) =>
-    index === self.findIndex((u) => u.id === user.id)
-  );
-
-  return uniquePending;
+  // Sort applications by date, with most recent first
+  return applications.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 };
 
 export const processRequest = async (
@@ -402,8 +377,8 @@ export const processRequest = async (
     const batch = writeBatch(db);
     const now = new Date();
     
-    // Update user document
-    batch.update(userRef, {
+    // Update user document with new role and status
+    const userUpdates = {
       applicationStatus: status,
       role: status === 'accepted' ? 'student' : 'newbie',
       updatedAt: now,
@@ -414,12 +389,14 @@ export const processRequest = async (
         timestamp: now,
         adminId
       })
-    });
+    };
+    
+    batch.update(userRef, userUpdates);
 
-    // If accepted, create a student profile
+    // If accepted, create/update student profile
     if (status === 'accepted') {
       const studentRef = doc(db, 'students', userId);
-      batch.set(studentRef, {
+      const studentData = {
         userId,
         email: userData.email,
         name: userData.name,
@@ -429,10 +406,29 @@ export const processRequest = async (
         place_of_study: userData.place_of_study,
         room_number: userData.room_number,
         tenant_code: userData.tenant_code,
+        role: 'student',
+        applicationStatus: 'accepted',
         createdAt: now,
         updatedAt: now,
         status: 'active'
+      };
+      
+      // Create notification for the user
+      const notificationRef = doc(collection(db, 'notifications'));
+      batch.set(notificationRef, {
+        userId,
+        title: status === 'accepted' ? 'Application Approved' : 'Application Denied',
+        message,
+        type: 'application',
+        read: false,
+        createdAt: now,
+        updatedAt: now
       });
+
+      batch.set(studentRef, studentData);
+      
+      // Also update the main user document with student data
+      batch.update(userRef, studentData);
     }
 
     await batch.commit();

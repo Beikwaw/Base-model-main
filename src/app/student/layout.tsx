@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter, usePathname } from 'next/navigation';
-import { Shield, Menu, Home, Settings, LogOut, Wrench, AlertCircle, Users, Calendar, Megaphone } from 'lucide-react';
+import { Shield, Menu, Home, Settings, LogOut, Wrench, AlertCircle, Users, Calendar, Megaphone, Building } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -100,12 +100,12 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
               <span className="font-bold text-xl">My Domain Student Living</span>
             </div>
             <div className="flex items-center space-x-4">
-              <NotificationsDropdown />
-              <ChatDialog />
-              <Separator orientation="vertical" className="h-8" />
-              <Avatar onClick={toggleApplicantDetails}>
+              <div className="text-sm text-muted-foreground">
+                {user?.email}
+              </div>
+              <Avatar>
                 <AvatarImage src={user?.photoURL || undefined} />
-                <AvatarFallback>{userData.name?.charAt(0).toUpperCase()}</AvatarFallback>
+                <AvatarFallback>{user?.email?.charAt(0).toUpperCase()}</AvatarFallback>
               </Avatar>
               <Button variant="ghost" onClick={handleLogout}>
                 <LogOut className="h-4 w-4 mr-2" />
