@@ -95,7 +95,8 @@ export interface SleepoverRequest {
   adminResponse?: string;
   securityCode?: string;
   isActive?: boolean;
-  signOutTime?: Date;
+  checkInTime?: string | null;
+  signOutTime?: Date | null;
 }
 
 export interface MaintenanceRequest {
@@ -201,7 +202,7 @@ export interface DetailedReport extends DailyReport {
   maintenance: {
     total: number;
     resolved: number;
-    denied: number;
+    denied: number
     pending: number;
     items: Array<{
       id: string;
@@ -236,6 +237,17 @@ export interface Announcement {
   status: 'active' | 'inactive';
   expiresAt?: Date;
 }
+
+export type Guest = {
+  id: string;
+  name: string;
+  roomNumber: string;
+  status: 'active' | 'checked-out';
+  checkInTime?: string;
+  checkOutTime?: string;
+  hostName: string;
+  hostId: string;
+};
 
 export const createUser = async (userData: Omit<UserData, 'createdAt' | 'updatedAt' | 'communicationLog'>): Promise<void> => {
   try {
@@ -636,41 +648,51 @@ export const modifyComplaintStatus = async (complaintId: string, status: Complai
 };
 
 export const updateSleepoverStatus = async (requestId: string, status: SleepoverRequest['status'], adminResponse?: string) => {
-  const requestRef = doc(db, 'sleepover_requests', requestId);
-  const requestSnap = await getDoc(requestRef);
-  
-  if (!requestSnap.exists()) {
-    throw new Error('Sleepover request not found');
+  try {
+    const requestRef = doc(db, 'sleepover_requests', requestId);
+    const requestSnap = await getDoc(requestRef);
+    
+    if (!requestSnap.exists()) {
+      throw new Error('Sleepover request not found');
+    }
+
+    const request = requestSnap.data();
+    const now = new Date();
+
+    // Only include adminResponse in the update if it's provided
+    const updateData: any = {
+      status,
+      updatedAt: now,
+      adminResponse: adminResponse || ''
+    };
+
+    // If approved, set isActive to true and add checkInTime
+    if (status === 'approved') {
+      updateData.isActive = true;
+      updateData.checkInTime = now.toISOString();
+    }
+
+    // If rejected, set isActive to false
+    if (status === 'rejected') {
+      updateData.isActive = false;
+    }
+
+    await updateDoc(requestRef, updateData);
+
+    // Create notification for the user
+    await createNotification({
+      userId: request.userId,
+      title: 'Sleepover Request Update',
+      message: `Your sleepover request for ${request.guestName} ${request.guestSurname} has been ${status}`,
+      type: 'sleepover',
+      read: false
+    });
+
+    return { success: true, message: `Sleepover request ${status} successfully` };
+  } catch (error) {
+    console.error('Error updating sleepover status:', error);
+    throw error;
   }
-
-  const request = requestSnap.data();
-  const now = new Date();
-
-  // Only include adminResponse in the update if it's provided
-  const updateData: any = {
-    status,
-    updatedAt: now
-  };
-
-  if (adminResponse !== undefined) {
-    updateData.adminResponse = adminResponse;
-  }
-
-  // If approved, set isActive to true
-  if (status === 'approved') {
-    updateData.isActive = true;
-  }
-
-  await updateDoc(requestRef, updateData);
-
-  // Create notification for the user
-  await createNotification({
-    userId: request.userId,
-    title: 'Sleepover Request Update',
-    message: `Your sleepover request for ${request.guestName} has been ${status}`,
-    type: 'sleepover',
-    read: false
-  });
 };
 
 export const updateMaintenanceRequestStatus = async (requestId: string, status: MaintenanceRequest['status'], adminResponse?: string) => {
@@ -855,20 +877,48 @@ export async function getAllSleepoverRequests() {
 
 export async function getAllGuestRequests() {
   const guestRef = collection(db, 'guests');
-  const q = query(guestRef, orderBy('createdAt', 'desc'));
+  const q = query(guestRef);
   const querySnapshot = await getDocs(q);
-  return querySnapshot.docs.map(doc => {
-    const data = doc.data();
-    return {
+  return querySnapshot.docs
+    .map(doc => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        ...data,
+        createdAt: data.createdAt?.toDate() || new Date(),
+        updatedAt: data.updatedAt?.toDate() || new Date(),
+        checkInTime: data.checkInTime,
+        checkOutTime: data.checkOutTime,
+        fromDate: data.fromDate
+      };
+    })
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+}
+
+export async function getMyGuestRequests(userId:string){
+  const guestRef = collection(db, 'guests');
+  const q = query(guestRef, where('userId', '==', userId));
+  const querySnapshot = await getDocs(q);
+  return querySnapshot.docs
+    .map(doc => ({
       id: doc.id,
-      ...data,
-      createdAt: data.createdAt?.toDate() || new Date(),
-      updatedAt: data.updatedAt?.toDate() || new Date(),
-      checkInTime: data.checkInTime,
-      checkOutTime: data.checkOutTime,
-      fromDate: data.fromDate
-    };
-  });
+      ...doc.data(),
+      createdAt: doc.data().createdAt?.toDate() || new Date(),
+    }))
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+}
+
+export async function getMyMaintenanceRequests(userId:string){
+  const maintenanceRef = collection(db, 'maintenance_requests');
+  const q = query(maintenanceRef, where('userId', '==', userId));
+  const querySnapshot = await getDocs(q);
+  return querySnapshot.docs
+    .map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+      createdAt: doc.data().createdAt?.toDate() || new Date(),
+    }))
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 }
 
 export const updateGuestStatus = async (id: string, status: 'pending' | 'approved' | 'rejected', adminResponse?: string) => {
@@ -922,47 +972,41 @@ export async function getMyComplaints(userId:string){
 }
 
 export async function getMySleepoverRequests(userId: string) {
-  const sleepoverRef = collection(db, 'sleepover_requests');
-  const q = query(
-    sleepoverRef,
-    where('userId', '==', userId),
-    orderBy('createdAt', 'desc')
-  );
-  const querySnapshot = await getDocs(q);
-  return querySnapshot.docs.map(doc => {
-    const data = doc.data();
-    return {
-      id: doc.id,
-      ...data,
-      createdAt: data.createdAt instanceof Date ? data.createdAt : data.createdAt?.toDate?.() || new Date(),
-      startDate: data.startDate instanceof Date ? data.startDate : data.startDate?.toDate?.() || new Date(),
-      endDate: data.endDate instanceof Date ? data.endDate : data.endDate?.toDate?.() || new Date(),
-      updatedAt: data.updatedAt instanceof Date ? data.updatedAt : data.updatedAt?.toDate?.() || new Date(),
-      signOutTime: data.signOutTime instanceof Date ? data.signOutTime : data.signOutTime?.toDate?.() || null
-    };
-  }) as SleepoverRequest[];
-}
-
-export async function getMyGuestRequests(userId:string){
-  const guestRef = collection(db, 'guests');
-  const q = query(guestRef, where('userId', '==', userId), orderBy('createdAt', 'desc'));
-  const querySnapshot = await getDocs(q);
-  return querySnapshot.docs.map(doc => ({
-    id: doc.id,
-    ...doc.data(),
-    createdAt: doc.data().createdAt?.toDate() || new Date(),
-  }));
-}
-
-export async function getMyMaintenanceRequests(userId:string){
-  const maintenanceRef = collection(db, 'maintenance_requests');
-  const q = query(maintenanceRef, where('userId', '==', userId), orderBy('createdAt', 'desc'));
-  const querySnapshot = await getDocs(q);
-  return querySnapshot.docs.map(doc => ({
-    id: doc.id,
-    ...doc.data(),
-    createdAt: doc.data().createdAt?.toDate() || new Date(),
-  }));
+  try {
+    const sleepoverRef = collection(db, 'sleepover_requests');
+    const q = query(
+      sleepoverRef,
+      where('userId', '==', userId),
+      orderBy('createdAt', 'desc')
+    );
+    const querySnapshot = await getDocs(q);
+    return querySnapshot.docs.map(doc => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        userId: data.userId,
+        guestName: data.guestName,
+        guestSurname: data.guestSurname,
+        guestPhone: data.guestPhone,
+        roomNumber: data.roomNumber,
+        tenantCode: data.tenantCode,
+        additionalGuests: data.additionalGuests || [],
+        startDate: data.startDate instanceof Date ? data.startDate : data.startDate?.toDate?.() || new Date(),
+        endDate: data.endDate instanceof Date ? data.endDate : data.endDate?.toDate?.() || new Date(),
+        status: data.status || 'pending',
+        createdAt: data.createdAt instanceof Date ? data.createdAt : data.createdAt?.toDate?.() || new Date(),
+        updatedAt: data.updatedAt instanceof Date ? data.updatedAt : data.updatedAt?.toDate?.() || new Date(),
+        adminResponse: data.adminResponse || '',
+        securityCode: data.securityCode || '',
+        isActive: data.isActive || false,
+        checkInTime: data.checkInTime || null,
+        signOutTime: data.signOutTime instanceof Date ? data.signOutTime : data.signOutTime?.toDate?.() || null
+      } as SleepoverRequest;
+    });
+  } catch (error) {
+    console.error('Error fetching sleepover requests:', error);
+    throw error;
+  }
 }
 
 export async function getRequestDetails(requestId: string) {
@@ -1088,14 +1132,6 @@ export async function getAnalyticsData(timeRange: "days" | "weeks" | "months") {
       break;
   }
 
-  // Fetch data from all collections
-  const [complaintsSnap, maintenanceSnap, sleepoverSnap, guestSnap] = await Promise.all([
-    getDocs(query(collection(db, 'complaints'), where('createdAt', '>=', startDate))),
-    getDocs(query(collection(db, 'maintenance_requests'), where('createdAt', '>=', startDate))),
-    getDocs(query(collection(db, 'sleepover_requests'), where('createdAt', '>=', startDate))),
-    getDocs(query(collection(db, 'guests'), where('createdAt', '>=', startDate)))
-  ]);
-
   // Create a map to store aggregated data by date
   const dataMap = new Map<string, {
     complaints: number;
@@ -1112,49 +1148,82 @@ export async function getAnalyticsData(timeRange: "days" | "weeks" | "months") {
     currentDate.setDate(currentDate.getDate() + 1);
   }
 
-  // Aggregate complaints data
-  complaintsSnap.docs.forEach(doc => {
-    const data = doc.data();
-    const date = data.createdAt.toDate();
-    const dateKey = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: timeRange === 'months' ? 'numeric' : undefined });
-    const current = dataMap.get(dateKey) || { complaints: 0, maintenance: 0, sleepover: 0, guests: 0 };
-    dataMap.set(dateKey, { ...current, complaints: current.complaints + 1 });
-  });
+  try {
+    // Fetch data from all collections without complex queries
+    const [complaintsSnap, maintenanceSnap, sleepoverSnap, guestSnap] = await Promise.all([
+      getDocs(collection(db, 'complaints')),
+      getDocs(collection(db, 'maintenance_requests')),
+      getDocs(collection(db, 'sleepover_requests')),
+      getDocs(collection(db, 'guests'))
+    ]);
 
-  // Aggregate maintenance data
-  maintenanceSnap.docs.forEach(doc => {
-    const data = doc.data();
-    const date = data.createdAt.toDate();
-    const dateKey = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: timeRange === 'months' ? 'numeric' : undefined });
-    const current = dataMap.get(dateKey) || { complaints: 0, maintenance: 0, sleepover: 0, guests: 0 };
-    dataMap.set(dateKey, { ...current, maintenance: current.maintenance + 1 });
-  });
+    // Helper function to safely convert Firestore timestamp to Date
+    const safeToDate = (timestamp: any) => {
+      if (timestamp instanceof Date) return timestamp;
+      if (timestamp?.toDate) return timestamp.toDate();
+      return new Date();
+    };
 
-  // Aggregate sleepover data
-  sleepoverSnap.docs.forEach(doc => {
-    const data = doc.data();
-    const date = data.createdAt.toDate();
-    const dateKey = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: timeRange === 'months' ? 'numeric' : undefined });
-    const current = dataMap.get(dateKey) || { complaints: 0, maintenance: 0, sleepover: 0, guests: 0 };
-    dataMap.set(dateKey, { ...current, sleepover: current.sleepover + 1 });
-  });
+    // Helper function to check if date is within range
+    const isWithinRange = (date: Date) => {
+      return date >= startDate && date <= new Date();
+    };
 
-  // Aggregate guest data
-  guestSnap.docs.forEach(doc => {
-    const data = doc.data();
-    const date = data.createdAt.toDate();
-    const dateKey = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: timeRange === 'months' ? 'numeric' : undefined });
-    const current = dataMap.get(dateKey) || { complaints: 0, maintenance: 0, sleepover: 0, guests: 0 };
-    dataMap.set(dateKey, { ...current, guests: current.guests + 1 });
-  });
+    // Aggregate complaints data
+    complaintsSnap.docs.forEach(doc => {
+      const data = doc.data();
+      const date = safeToDate(data.createdAt);
+      if (isWithinRange(date)) {
+        const dateKey = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: timeRange === 'months' ? 'numeric' : undefined });
+        const current = dataMap.get(dateKey) || { complaints: 0, maintenance: 0, sleepover: 0, guests: 0 };
+        dataMap.set(dateKey, { ...current, complaints: current.complaints + 1 });
+      }
+    });
 
-  // Convert map to array and sort by date
-  return Array.from(dataMap.entries())
-    .map(([date, counts]) => ({
-      date,
-      ...counts
-    }))
-    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    // Aggregate maintenance data
+    maintenanceSnap.docs.forEach(doc => {
+      const data = doc.data();
+      const date = safeToDate(data.createdAt);
+      if (isWithinRange(date)) {
+        const dateKey = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: timeRange === 'months' ? 'numeric' : undefined });
+        const current = dataMap.get(dateKey) || { complaints: 0, maintenance: 0, sleepover: 0, guests: 0 };
+        dataMap.set(dateKey, { ...current, maintenance: current.maintenance + 1 });
+      }
+    });
+
+    // Aggregate sleepover data
+    sleepoverSnap.docs.forEach(doc => {
+      const data = doc.data();
+      const date = safeToDate(data.createdAt);
+      if (isWithinRange(date)) {
+        const dateKey = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: timeRange === 'months' ? 'numeric' : undefined });
+        const current = dataMap.get(dateKey) || { complaints: 0, maintenance: 0, sleepover: 0, guests: 0 };
+        dataMap.set(dateKey, { ...current, sleepover: current.sleepover + 1 });
+      }
+    });
+
+    // Aggregate guest data
+    guestSnap.docs.forEach(doc => {
+      const data = doc.data();
+      const date = safeToDate(data.createdAt);
+      if (isWithinRange(date)) {
+        const dateKey = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: timeRange === 'months' ? 'numeric' : undefined });
+        const current = dataMap.get(dateKey) || { complaints: 0, maintenance: 0, sleepover: 0, guests: 0 };
+        dataMap.set(dateKey, { ...current, guests: current.guests + 1 });
+      }
+    });
+
+    // Convert map to array and sort by date
+    return Array.from(dataMap.entries())
+      .map(([date, counts]) => ({
+        date,
+        ...counts
+      }))
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  } catch (error) {
+    console.error('Error fetching analytics data:', error);
+    throw error;
+  }
 }
 
 export const getUserByTenantCode = async (tenantCode: string): Promise<FirestoreUser> => {
@@ -1382,8 +1451,8 @@ export const generateDailyReport = async (tenantCode: string, date: Date): Promi
     const endOfDay = new Date(date);
     endOfDay.setHours(23, 59, 59, 999);
 
-    // Get sleepovers
-    const sleepoversRef = collection(db, 'tenants', tenantCode, 'sleepovers');
+    // Get sleepovers - using simple query without complex ordering
+    const sleepoversRef = collection(db, 'sleepover_requests');
     const sleepoversQuery = query(
       sleepoversRef,
       where('createdAt', '>=', startOfDay),
@@ -1392,8 +1461,8 @@ export const generateDailyReport = async (tenantCode: string, date: Date): Promi
     const sleepoversSnapshot = await getDocs(sleepoversQuery);
     const sleepovers = sleepoversSnapshot.docs.map(doc => doc.data());
 
-    // Get maintenance requests
-    const maintenanceRef = collection(db, 'tenants', tenantCode, 'maintenance');
+    // Get maintenance requests - using simple query
+    const maintenanceRef = collection(db, 'maintenance_requests');
     const maintenanceQuery = query(
       maintenanceRef,
       where('createdAt', '>=', startOfDay),
@@ -1402,8 +1471,8 @@ export const generateDailyReport = async (tenantCode: string, date: Date): Promi
     const maintenanceSnapshot = await getDocs(maintenanceQuery);
     const maintenance = maintenanceSnapshot.docs.map(doc => doc.data());
 
-    // Get complaints
-    const complaintsRef = collection(db, 'tenants', tenantCode, 'complaints');
+    // Get complaints - using simple query
+    const complaintsRef = collection(db, 'complaints');
     const complaintsQuery = query(
       complaintsRef,
       where('createdAt', '>=', startOfDay),
@@ -1435,7 +1504,13 @@ export const generateDailyReport = async (tenantCode: string, date: Date): Promi
     };
   } catch (error) {
     console.error('Error generating daily report:', error);
-    throw error;
+    // Return empty report structure instead of throwing
+    return {
+      date,
+      sleepovers: { total: 0, resolved: 0, denied: 0, pending: 0 },
+      maintenance: { total: 0, resolved: 0, denied: 0, pending: 0 },
+      complaints: { total: 0, resolved: 0, denied: 0, pending: 0 }
+    };
   }
 };
 
@@ -1545,31 +1620,29 @@ export const generateDetailedReport = async (tenantCode: string, date: Date): Pr
   }
 };
 
-export const signOutSleepoverGuest = async (userId: string, guestId: string): Promise<void> => {
+export const signOutSleepoverGuest = async (requestId: string, userId: string): Promise<void> => {
   try {
-    const userRef = doc(db, 'users', userId);
-    const userDoc = await getDoc(userRef);
+    const requestRef = doc(db, 'sleepover_requests', requestId);
+    const requestDoc = await getDoc(requestRef);
 
-    if (!userDoc.exists()) {
-      throw new Error('User not found');
+    if (!requestDoc.exists()) {
+      throw new Error('Sleepover request not found');
     }
 
-    const userData = userDoc.data();
-    const activeGuests = userData.activeGuests || [];
+    const now = new Date();
 
-    // Remove the guest from activeGuests
-    const updatedActiveGuests = activeGuests.filter((guest: any) => guest.id !== guestId);
-
-    // Update the user document
-    await updateDoc(userRef, {
-      activeGuests: updatedActiveGuests,
+    // Update the request document
+    await updateDoc(requestRef, {
+      status: 'checked-out',
+      isActive: false,
+      signOutTime: now,
       updatedAt: serverTimestamp()
     });
 
     // Add to communication log
     await addCommunication(
       userId,
-      `Guest ${guestId} checked out successfully`,
+      `Sleepover guest checked out successfully`,
       'student'
     );
   } catch (error) {
@@ -1621,24 +1694,50 @@ export const checkOutGuest = async (guestId: string, securityCode: string): Prom
   }
 };
 
-export const getActiveSleepoverGuests = async (userId: string) => {
-  const requestsRef = collection(db, 'sleepover_requests');
-  const q = query(
-    requestsRef,
-    where('userId', '==', userId),
-    where('status', '==', 'approved'),
-    where('isActive', '==', true)
-  );
-  const querySnapshot = await getDocs(q);
-  return querySnapshot.docs.map(doc => ({
-    id: doc.id,
-    ...doc.data(),
-    createdAt: doc.data().createdAt?.toDate() || new Date(),
-    updatedAt: doc.data().updatedAt?.toDate() || new Date(),
-    startDate: doc.data().startDate?.toDate() || new Date(),
-    endDate: doc.data().endDate?.toDate() || new Date(),
-    signOutTime: doc.data().signOutTime?.toDate()
-  })) as SleepoverRequest[];
+export const getActiveSleepoverGuests = async () => {
+  try {
+    const requestsRef = collection(db, 'sleepover_requests');
+    // First get by isActive
+    const q = query(
+      requestsRef,
+      where('isActive', '==', true)
+    );
+    const querySnapshot = await getDocs(q);
+    
+    // Sort in memory instead of in query
+    return querySnapshot.docs
+      .map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          userId: data.userId,
+          guestName: data.guestName,
+          guestSurname: data.guestSurname,
+          guestPhone: data.guestPhone,
+          roomNumber: data.roomNumber,
+          tenantCode: data.tenantCode,
+          additionalGuests: data.additionalGuests || [],
+          startDate: data.startDate instanceof Date ? data.startDate : data.startDate?.toDate?.() || new Date(),
+          endDate: data.endDate instanceof Date ? data.endDate : data.endDate?.toDate?.() || new Date(),
+          status: data.status || 'pending',
+          createdAt: data.createdAt instanceof Date ? data.createdAt : data.createdAt?.toDate?.() || new Date(),
+          updatedAt: data.updatedAt instanceof Date ? data.updatedAt : data.updatedAt?.toDate?.() || new Date(),
+          adminResponse: data.adminResponse || '',
+          securityCode: data.securityCode || '',
+          isActive: data.isActive || false,
+          checkInTime: data.checkInTime || null,
+          signOutTime: data.signOutTime instanceof Date ? data.signOutTime : data.signOutTime?.toDate?.() || null
+        } as SleepoverRequest;
+      })
+      .sort((a, b) => {
+        const timeA = a.checkInTime ? new Date(a.checkInTime).getTime() : 0;
+        const timeB = b.checkInTime ? new Date(b.checkInTime).getTime() : 0;
+        return timeB - timeA;
+      });
+  } catch (error) {
+    console.error('Error fetching active sleepover guests:', error);
+    throw error;
+  }
 };
 
 export const createGuest = async (guestData: {
@@ -1683,12 +1782,103 @@ export const getGuests = async (userId: string) => {
     const q = query(guestsRef, where('userId', '==', userId));
     const querySnapshot = await getDocs(q);
     
-    return querySnapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    }));
+    // Sort the results in memory instead of using orderBy
+    return querySnapshot.docs
+      .map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        createdAt: doc.data().createdAt?.toDate?.() || new Date()
+      }))
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
   } catch (error) {
     console.error('Error fetching guests:', error);
+    throw error;
+  }
+};
+
+export const getCheckedOutGuests = async (): Promise<Guest[]> => {
+  try {
+    const guestsRef = collection(db, 'guests');
+    const q = query(
+      guestsRef,
+      where('status', '==', 'rejected')
+    );
+    const querySnapshot = await getDocs(q);
+    return querySnapshot.docs.map(doc => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        name: `${data.firstName || ''} ${data.lastName || ''}`.trim(),
+        roomNumber: data.roomNumber || '',
+        status: 'checked-out',
+        checkInTime: data.checkInTime || '',
+        checkOutTime: data.checkOutTime || '',
+        hostName: data.hostName || '',
+        hostId: data.userId || ''
+      } as Guest;
+    });
+  } catch (error) {
+    console.error('Error fetching checked out guests:', error);
+    throw error;
+  }
+};
+
+export const getCheckedOutSleepoverGuests = async () => {
+  try {
+    const requestsRef = collection(db, 'sleepover_requests');
+    const q = query(
+      requestsRef,
+      where('isActive', '==', false)
+    );
+    const querySnapshot = await getDocs(q);
+    return querySnapshot.docs
+      .map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          ...data,
+          createdAt: data.createdAt instanceof Date ? data.createdAt : data.createdAt?.toDate?.() || new Date(),
+          updatedAt: data.updatedAt instanceof Date ? data.updatedAt : data.updatedAt?.toDate?.() || new Date(),
+          startDate: data.startDate instanceof Date ? data.startDate : data.startDate?.toDate?.() || new Date(),
+          endDate: data.endDate instanceof Date ? data.endDate : data.endDate?.toDate?.() || new Date(),
+          signOutTime: data.signOutTime instanceof Date ? data.signOutTime : data.signOutTime?.toDate?.() || null
+        } as SleepoverRequest;
+      })
+      .sort((a, b) => {
+        // Sort in memory by signOutTime in descending order
+        const timeA = a.signOutTime?.getTime() || 0;
+        const timeB = b.signOutTime?.getTime() || 0;
+        return timeB - timeA;
+      });
+  } catch (error) {
+    console.error('Error fetching checked out sleepover guests:', error);
+    throw error;
+  }
+};
+
+export const getActiveGuests = async (): Promise<Guest[]> => {
+  try {
+    const guestsRef = collection(db, 'guests');
+    const q = query(
+      guestsRef,
+      where('status', '==', 'active')
+    );
+    const querySnapshot = await getDocs(q);
+    return querySnapshot.docs.map(doc => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        name: `${data.firstName || ''} ${data.lastName || ''}`.trim(),
+        roomNumber: data.roomNumber || '',
+        status: 'active',
+        checkInTime: data.checkInTime || '',
+        checkOutTime: data.checkOutTime || '',
+        hostName: data.hostName || '',
+        hostId: data.userId || ''
+      } as Guest;
+    });
+  } catch (error) {
+    console.error('Error fetching active guests:', error);
     throw error;
   }
 };

@@ -4,6 +4,11 @@ import { getSleepoverRequests, createSleepoverRequest, signOutSleepoverGuest, ge
 import { SleepoverRequest } from '@/lib/firestore';
 import { format } from 'date-fns';
 import { toast } from 'react-hot-toast';
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
+import { UserPlus, Home, Calendar, Users, Key, LogOut, AlertCircle } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
 
 export default function SleepoverRequestPage() {
   const { user } = useAuth();
@@ -143,24 +148,65 @@ export default function SleepoverRequestPage() {
 
       {/* Active Guests Section */}
       <div className="mb-8">
-        <h2 className="text-xl font-semibold mb-4">Active Guests</h2>
-        <div className="grid gap-4">
-          {activeGuests.map((guest) => (
-            <div key={guest.id} className="bg-white p-4 rounded-lg shadow">
-              <h3 className="font-semibold">{guest.guestName} {guest.guestSurname}</h3>
-              <p>Room: {guest.roomNumber}</p>
-              <p>Check-in: {format(guest.startDate, 'PPP')}</p>
-              <p>Check-out: {format(guest.endDate, 'PPP')}</p>
-              <p className="text-sm text-gray-600">Security Code: {guest.securityCode}</p>
-              <button
-                onClick={() => setSelectedRequest(guest)}
-                className="mt-2 bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600"
-              >
-                Sign Out Guest
-              </button>
-            </div>
-          ))}
-        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>Active Guests</CardTitle>
+            <CardDescription>Currently checked-in sleepover guests</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {activeGuests.length === 0 ? (
+              <div className="text-center py-6">
+                <p className="text-muted-foreground">No active guests at the moment</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {activeGuests.map((guest) => (
+                  <div key={guest.id} className="flex items-center justify-between p-4 border rounded-lg bg-white hover:bg-gray-50">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <UserPlus className="h-4 w-4 text-blue-500" />
+                        <p className="font-medium">{guest.guestName} {guest.guestSurname}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Home className="h-4 w-4 text-gray-500" />
+                        <p className="text-sm text-muted-foreground">Room {guest.roomNumber}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Calendar className="h-4 w-4 text-green-500" />
+                        <p className="text-sm text-muted-foreground">
+                          {format(guest.startDate, 'PPP')} - {format(guest.endDate, 'PPP')}
+                        </p>
+                      </div>
+                      {guest.additionalGuests && guest.additionalGuests.length > 0 && (
+                        <div className="flex items-center gap-2">
+                          <Users className="h-4 w-4 text-indigo-500" />
+                          <p className="text-sm text-muted-foreground">
+                            {guest.additionalGuests.length} additional guest(s)
+                          </p>
+                        </div>
+                      )}
+                      <div className="flex items-center gap-2">
+                        <Key className="h-4 w-4 text-yellow-500" />
+                        <p className="text-sm font-mono bg-gray-100 px-2 py-0.5 rounded">
+                          Security Code: {guest.securityCode}
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      onClick={() => setSelectedRequest(guest)}
+                      variant="destructive"
+                      size="sm"
+                      className="ml-4"
+                    >
+                      <LogOut className="h-4 w-4 mr-2" />
+                      Sign Out
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
       {/* Request Form */}
@@ -290,78 +336,125 @@ export default function SleepoverRequestPage() {
 
       {/* Request History */}
       <div>
-        <h2 className="text-xl font-semibold mb-4">Request History</h2>
-        <div className="space-y-4">
-          {requests.map((request) => (
-            <div key={request.id} className="bg-white p-4 rounded-lg shadow">
-              <div className="flex justify-between items-start">
-                <div>
-                  <h3 className="font-semibold">{request.guestName} {request.guestSurname}</h3>
-                  <p>Room: {request.roomNumber}</p>
-                  <p>Status: <span className={`font-semibold ${request.status === 'approved' ? 'text-green-600' : request.status === 'rejected' ? 'text-red-600' : 'text-yellow-600'}`}>{request.status}</span></p>
-                  <p>Check-in: {format(request.startDate, 'PPP')}</p>
-                  <p>Check-out: {format(request.endDate, 'PPP')}</p>
-                  {request.additionalGuests && request.additionalGuests.length > 0 && (
-                    <div className="mt-2">
-                      <p className="font-medium">Additional Guests:</p>
-                      <ul className="list-disc list-inside">
-                        {request.additionalGuests.map((guest, index) => (
-                          <li key={index}>{guest.name} {guest.surname} - {guest.phoneNumber}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                </div>
-                {request.status === 'approved' && request.isActive && (
-                  <button
-                    onClick={() => setSelectedRequest(request)}
-                    className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600"
-                  >
-                    Sign Out Guest
-                  </button>
-                )}
+        <Card>
+          <CardHeader>
+            <CardTitle>Request History</CardTitle>
+            <CardDescription>Past and pending sleepover requests</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {requests.length === 0 ? (
+              <div className="text-center py-6">
+                <p className="text-muted-foreground">No request history available</p>
               </div>
-              {request.adminResponse && (
-                <div className="mt-2 p-2 bg-gray-50 rounded">
-                  <p className="text-sm text-gray-600">Admin Response: {request.adminResponse}</p>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
+            ) : (
+              <div className="space-y-4">
+                {requests
+                  .filter(request => !request.isActive) // Remove active requests from history
+                  .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+                  .map((request) => (
+                    <div key={request.id} className="border rounded-lg p-4 hover:bg-gray-50">
+                      <div className="flex items-start justify-between">
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2">
+                            <UserPlus className="h-4 w-4 text-blue-500" />
+                            <span className="font-medium">{request.guestName} {request.guestSurname}</span>
+                          </div>
+                          
+                          <div className="flex items-center gap-2">
+                            <Home className="h-4 w-4 text-gray-500" />
+                            <span className="text-sm text-muted-foreground">Room {request.roomNumber}</span>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <Calendar className="h-4 w-4 text-green-500" />
+                            <span className="text-sm text-muted-foreground">
+                              {format(request.startDate, 'PPP')} - {format(request.endDate, 'PPP')}
+                            </span>
+                          </div>
+
+                          {request.additionalGuests && request.additionalGuests.length > 0 && (
+                            <div className="flex items-start gap-2">
+                              <Users className="h-4 w-4 text-indigo-500 mt-1" />
+                              <div className="text-sm text-muted-foreground">
+                                <p className="font-medium mb-1">Additional Guests:</p>
+                                <ul className="list-disc list-inside pl-2 space-y-1">
+                                  {request.additionalGuests.map((guest, index) => (
+                                    <li key={index} className="text-sm">
+                                      {guest.name} {guest.surname} - {guest.phoneNumber}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex flex-col items-end gap-2">
+                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
+                            ${request.status === 'approved' ? 'bg-green-100 text-green-800' : 
+                              request.status === 'rejected' ? 'bg-red-100 text-red-800' : 
+                              'bg-yellow-100 text-yellow-800'}`}>
+                            {request.status.charAt(0).toUpperCase() + request.status.slice(1)}
+                          </span>
+                          <span className="text-xs text-muted-foreground">
+                            Requested on {format(new Date(request.createdAt), 'PP')}
+                          </span>
+                        </div>
+                      </div>
+
+                      {request.adminResponse && (
+                        <div className="mt-3 flex items-start gap-2 bg-gray-50 p-3 rounded-md">
+                          <AlertCircle className="h-4 w-4 text-blue-500 mt-0.5" />
+                          <div className="flex-1">
+                            <p className="text-sm font-medium text-gray-900">Admin Response</p>
+                            <p className="text-sm text-muted-foreground">{request.adminResponse}</p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
       {/* Sign Out Modal */}
       {selectedRequest && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
-          <div className="bg-white p-6 rounded-lg w-full max-w-md">
-            <h3 className="text-xl font-semibold mb-4">Sign Out Guest</h3>
-            <p className="mb-4">Enter the security code to sign out the guest:</p>
-            <input
-              type="text"
-              value={signOutCode}
-              onChange={(e) => setSignOutCode(e.target.value)}
-              placeholder="Enter security code"
-              className="border p-2 rounded mb-4 w-full"
-            />
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => {
-                  setSelectedRequest(null);
-                  setSignOutCode('');
-                }}
-                className="px-4 py-2 border rounded"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSignOut}
-                className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600"
-              >
-                Sign Out
-              </button>
-            </div>
-          </div>
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
+          <Card className="w-full max-w-md">
+            <CardHeader>
+              <CardTitle>Sign Out Guest</CardTitle>
+              <CardDescription>
+                Please enter the security code to sign out {selectedRequest.guestName} {selectedRequest.guestSurname}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="signOutCode">Security Code</Label>
+                  <Input
+                    id="signOutCode"
+                    type="text"
+                    value={signOutCode}
+                    onChange={(e) => setSignOutCode(e.target.value)}
+                    placeholder="Enter security code"
+                  />
+                </div>
+                <div className="flex gap-2 justify-end">
+                  <Button variant="outline" onClick={() => {
+                    setSelectedRequest(null);
+                    setSignOutCode('');
+                  }}>
+                    Cancel
+                  </Button>
+                  <Button variant="destructive" onClick={handleSignOut}>
+                    Confirm Sign Out
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         </div>
       )}
     </div>

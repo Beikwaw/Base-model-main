@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Plus, History } from 'lucide-react';
+import { Plus, History, AlertTriangle } from 'lucide-react';
 import { getSleepoverRequests, getActiveSleepoverGuests, signOutSleepoverGuest, SleepoverRequest } from '@/lib/firestore';
 import { format, isToday } from 'date-fns';
 import { useRouter } from 'next/navigation';
@@ -18,9 +18,10 @@ export default function SleepoversPage() {
   const [requests, setRequests] = useState<SleepoverRequest[]>([]);
   const [activeGuests, setActiveGuests] = useState<SleepoverRequest[]>([]);
   const [loading, setLoading] = useState(true);
-  const [signOutPin, setSignOutPin] = useState('');
   const [selectedRequest, setSelectedRequest] = useState<SleepoverRequest | null>(null);
   const [showHistory, setShowHistory] = useState(false);
+  const [securityPin, setSecurityPin] = useState('');
+  const [showSecurityInput, setShowSecurityInput] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -55,24 +56,26 @@ export default function SleepoversPage() {
     }
   };
 
-  const handleSignOut = async () => {
+  const handleSecurityCheckout = async () => {
     if (!selectedRequest) return;
 
-    if (signOutPin.trim() !== '3693') {
-      toast.error('Invalid PIN. Please try again.');
+    // PIN verification - hardcoded but not visible in UI
+    if (securityPin !== '1005') {
+      toast.error('Invalid security PIN. Access denied.');
       return;
     }
 
     try {
-      await signOutSleepoverGuest(selectedRequest.id, signOutPin);
-      toast.success('Guest signed out successfully');
-      setSignOutPin('');
+      await signOutSleepoverGuest(selectedRequest.id, selectedRequest.userId);
+      toast.success('Guest checked out successfully');
+      setSecurityPin('');
       setSelectedRequest(null);
+      setShowSecurityInput(false);
       fetchActiveGuests();
       fetchRequests();
     } catch (error) {
-      console.error('Error signing out guest:', error);
-      toast.error('Failed to sign out guest');
+      console.error('Error checking out guest:', error);
+      toast.error('Failed to check out guest');
     }
   };
 
@@ -115,6 +118,21 @@ export default function SleepoversPage() {
       {activeGuests.length > 0 && (
         <div className="mb-8">
           <h2 className="text-xl font-semibold mb-4">Guests to Sign Out</h2>
+          <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-4">
+            <div className="flex">
+              <AlertTriangle className="h-5 w-5 text-yellow-400" />
+              <div className="ml-3">
+                <p className="text-sm text-yellow-700">
+                  <strong>Checkout Instructions:</strong>
+                </p>
+                <ul className="list-disc list-inside mt-1 text-sm text-yellow-700">
+                  <li>Visit the security desk at the front entrance</li>
+                  <li>Security will verify and check out your guest</li>
+                  <li>Ensure your guest is present during checkout</li>
+                </ul>
+              </div>
+            </div>
+          </div>
           <div className="grid gap-4">
             {activeGuests.map((guest) => (
               <div key={guest.id} className="bg-white p-4 rounded-lg shadow">
@@ -130,7 +148,7 @@ export default function SleepoversPage() {
                     variant="destructive"
                     className="h-10"
                   >
-                    Sign Out Guest
+                    Start Checkout
                   </Button>
                 </div>
               </div>
@@ -221,37 +239,70 @@ export default function SleepoversPage() {
         </div>
       )}
 
-      {/* Sign Out Modal */}
+      {/* Security Checkout Modal */}
       {selectedRequest && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
           <div className="bg-white p-6 rounded-lg w-full max-w-md">
-            <h3 className="text-xl font-semibold mb-4">Sign Out Guest</h3>
-            <p className="mb-4">Enter the security PIN to sign out the guest:</p>
-            <input
-              type="password"
-              value={signOutPin}
-              onChange={(e) => setSignOutPin(e.target.value)}
-              placeholder="Enter security PIN"
-              className="border p-2 rounded mb-4 w-full"
-              maxLength={4}
-            />
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => {
-                  setSelectedRequest(null);
-                  setSignOutPin('');
-                }}
-                className="px-4 py-2 border rounded"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSignOut}
-                className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600"
-              >
-                Sign Out
-              </button>
-            </div>
+            <h3 className="text-xl font-semibold mb-4">Security Checkout</h3>
+            {!showSecurityInput ? (
+              <>
+                <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded">
+                  <h4 className="font-medium text-blue-800 mb-2">Checkout Process:</h4>
+                  <ol className="list-decimal list-inside space-y-2 text-sm text-blue-800">
+                    <li>Take your guest to the security desk</li>
+                    <li>Security will verify guest identity</li>
+                    <li>Security will process the checkout</li>
+                  </ol>
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => setSelectedRequest(null)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="default"
+                    onClick={() => setShowSecurityInput(true)}
+                  >
+                    Security Access
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Security PIN Required
+                  </label>
+                  <input
+                    type="password"
+                    value={securityPin}
+                    onChange={(e) => setSecurityPin(e.target.value)}
+                    placeholder="Enter security PIN"
+                    className="w-full p-2 border rounded-md"
+                    maxLength={4}
+                  />
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setShowSecurityInput(false);
+                      setSecurityPin('');
+                    }}
+                  >
+                    Back
+                  </Button>
+                  <Button
+                    variant="default"
+                    onClick={handleSecurityCheckout}
+                  >
+                    Verify & Checkout
+                  </Button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

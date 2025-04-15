@@ -12,6 +12,10 @@ import {
   getMaintenanceRequests,
   getAllGuestRequests,
   getAnalyticsData,
+  getActiveGuests,
+  getCheckedOutGuests,
+  getActiveSleepoverGuests,
+  getCheckedOutSleepoverGuests,
   Complaint,
   SleepoverRequest,
   MaintenanceRequest
@@ -29,12 +33,14 @@ import {
   Activity,
   RefreshCw,
   BarChart as BarChartIcon,
-  LineChart as LineChartIcon
+  LineChart as LineChartIcon,
+  Loader2
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { format } from 'date-fns';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, Bar } from 'recharts';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 export default function AdminDashboardPage() {
   const { user } = useAuth();
@@ -45,10 +51,62 @@ export default function AdminDashboardPage() {
   const [maintenanceRequests, setMaintenanceRequests] = useState<MaintenanceRequest[]>([]);
   const [guestRequests, setGuestRequests] = useState<any[]>([]);
   const [analyticsData, setAnalyticsData] = useState<any[]>([]);
+  const [activeGuests, setActiveGuests] = useState<any[]>([]);
+  const [checkedOutGuests, setCheckedOutGuests] = useState<any[]>([]);
+  const [activeSleepoverGuests, setActiveSleepoverGuests] = useState<any[]>([]);
+  const [checkedOutSleepoverGuests, setCheckedOutSleepoverGuests] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [timeRange, setTimeRange] = useState<"days" | "weeks" | "months">("days");
+  const [timeRange, setTimeRange] = useState<"7d" | "30d" | "90d">("7d");
   const [chartType, setChartType] = useState<"line" | "bar">("line");
+
+  const fetchData = async () => {
+    try {
+      setLoading(true);
+      // Convert timeRange to the format expected by getAnalyticsData
+      const analyticsTimeRange = timeRange === "7d" ? "days" : timeRange === "30d" ? "weeks" : "months";
+      
+      const [
+        applications,
+        complaints,
+        sleepovers,
+        maintenance,
+        guestRequests,
+        analytics,
+        activeGuests,
+        checkedOutGuests,
+        activeSleepoverGuests,
+        checkedOutSleepoverGuests
+      ] = await Promise.all([
+        getPendingApplications(),
+        getComplaints(),
+        getSleepoverRequests(),
+        getMaintenanceRequests(),
+        getAllGuestRequests(),
+        getAnalyticsData(analyticsTimeRange),
+        getActiveGuests(),
+        getCheckedOutGuests(),
+        getActiveSleepoverGuests(),
+        getCheckedOutSleepoverGuests()
+      ]);
+
+      setPendingApplications(applications);
+      setComplaints(complaints);
+      setSleepoverRequests(sleepovers);
+      setMaintenanceRequests(maintenance);
+      setGuestRequests(guestRequests);
+      setAnalyticsData(analytics || []); // Ensure we always set an array even if analytics is undefined
+      setActiveGuests(activeGuests);
+      setCheckedOutGuests(checkedOutGuests);
+      setActiveSleepoverGuests(activeSleepoverGuests);
+      setCheckedOutSleepoverGuests(checkedOutSleepoverGuests);
+    } catch (error) {
+      console.error('Error fetching data:', error);
+      setError('Failed to load dashboard data');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     fetchData();
@@ -56,192 +114,215 @@ export default function AdminDashboardPage() {
     return () => clearInterval(interval);
   }, [timeRange]);
 
-  const fetchData = async () => {
-    try {
-      const [
-        applications, 
-        complaintsData, 
-        sleepoverData, 
-        maintenanceData, 
-        guestData,
-        analytics
-      ] = await Promise.all([
-        getPendingApplications(),
-        getComplaints(),
-        getSleepoverRequests(),
-        getMaintenanceRequests(),
-        getAllGuestRequests(),
-        getAnalyticsData(timeRange)
-      ]);
-      
-      setPendingApplications(applications);
-      setComplaints(complaintsData);
-      setSleepoverRequests(sleepoverData);
-      setMaintenanceRequests(maintenanceData);
-      setGuestRequests(guestData);
-      setAnalyticsData(analytics);
-    } catch (err) {
-      setError('Failed to fetch data');
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   if (loading) {
     return (
-      <div className="flex justify-center items-center min-h-screen">
-        <div className="flex flex-col items-center gap-4">
-          <RefreshCw className="h-8 w-8 animate-spin text-primary" />
-          <p className="text-muted-foreground">Loading dashboard data...</p>
-        </div>
+      <div className="flex h-screen items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin" />
       </div>
     );
   }
 
   if (error) {
-    return <div className="text-red-500 text-center p-4">{error}</div>;
+    return (
+      <div className="container mx-auto p-6">
+        <Card className="border-red-200 bg-red-50">
+          <CardHeader>
+            <CardTitle className="text-red-600">Dashboard Error</CardTitle>
+            <CardDescription className="text-red-500">There was a problem loading the dashboard data</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <p className="text-red-500 mb-4">{error}</p>
+            <div className="flex gap-4">
+              <Button onClick={fetchData} variant="outline">
+                <RefreshCw className="mr-2 h-4 w-4" />
+                Retry Loading
+              </Button>
+              <Button onClick={() => setError(null)} variant="ghost">
+                Dismiss
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
   }
 
-  const activeGuests = guestRequests.filter(request => request.status === 'active' || request.status === 'checked-in');
-  const checkedOutGuests = guestRequests.filter(request => request.status === 'checked-out');
-  const applicationsPending = pendingApplications.length;
-  const pendingComplaints = complaints.filter(c => c.status === 'pending').length;
-  const pendingSleepovers = sleepoverRequests.filter(r => r.status === 'pending').length;
-  const pendingMaintenance = maintenanceRequests.filter(r => r.status === 'pending').length;
+  const overviewCards = [
+    {
+      title: 'Active Guests',
+      value: activeGuests.length,
+      description: 'Currently checked-in guests',
+    },
+    {
+      title: 'Pending Requests',
+      value: maintenanceRequests.filter(r => r.status === 'pending').length,
+      description: 'Maintenance requests awaiting action',
+    },
+    {
+      title: 'Active Complaints',
+      value: complaints.filter(c => c.status === 'active').length,
+      description: 'Unresolved complaints',
+    },
+    {
+      title: 'New Applications',
+      value: pendingApplications.length,
+      description: 'Applications pending review',
+    },
+  ];
 
   return (
-    <div className="space-y-6 p-8">
+    <div className="container mx-auto p-6 space-y-6">
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-3xl font-bold">Admin Dashboard</h1>
-          <p className="text-muted-foreground">Real-time overview of all activities</p>
+          <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
+          <p className="text-muted-foreground">Overview of your residence management system</p>
         </div>
-        <Button onClick={fetchData} variant="outline" size="sm">
-          <RefreshCw className="h-4 w-4 mr-2" />
-          Refresh Data
-        </Button>
+        <div className="flex items-center gap-4">
+          <Button onClick={fetchData} variant="outline" size="sm">
+            Refresh Data
+          </Button>
+        </div>
       </div>
 
-      {/* Stats Overview */}
+      {/* Overview Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card className="hover:shadow-lg transition-all">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Active Guests</CardTitle>
-            <UserPlus className="h-4 w-4 text-green-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{activeGuests.length}</div>
-            <div className="text-xs text-muted-foreground flex items-center gap-1">
-              <span>{checkedOutGuests.length} checked out today</span>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="hover:shadow-lg transition-all">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Pending Requests</CardTitle>
-            <Activity className="h-4 w-4 text-blue-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{pendingSleepovers + pendingMaintenance}</div>
-            <div className="text-xs text-muted-foreground">
-              {pendingSleepovers} sleepover, {pendingMaintenance} maintenance
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="hover:shadow-lg transition-all">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Active Complaints</CardTitle>
-            <AlertCircle className="h-4 w-4 text-orange-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{pendingComplaints}</div>
-            <div className="text-xs text-muted-foreground">
-              {complaints.length} total complaints
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="hover:shadow-lg transition-all">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">New Applications</CardTitle>
-            <Users className="h-4 w-4 text-purple-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{applicationsPending}</div>
-            <div className="text-xs text-muted-foreground">
-              Pending student applications
-            </div>
-          </CardContent>
-        </Card>
+        {overviewCards.map((card) => (
+          <Card key={card.title}>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">{card.title}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{card.value}</div>
+              <p className="text-xs text-muted-foreground">{card.description}</p>
+            </CardContent>
+          </Card>
+        ))}
       </div>
 
-      {/* Analytics Chart */}
+      {/* Analytics Section */}
       <Card className="col-span-4">
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
-              <CardTitle>Activity Analytics</CardTitle>
-              <CardDescription>Overview of all activities over time</CardDescription>
+              <CardTitle>Analytics Overview</CardTitle>
+              <CardDescription>System activity over time</CardDescription>
             </div>
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2 border rounded-lg p-1">
-                <Button
-                  variant={chartType === 'line' ? 'default' : 'ghost'}
-                  size="sm"
-                  onClick={() => setChartType('line')}
-                >
-                  <LineChartIcon className="h-4 w-4" />
-                </Button>
-                <Button
-                  variant={chartType === 'bar' ? 'default' : 'ghost'}
-                  size="sm"
-                  onClick={() => setChartType('bar')}
-                >
-                  <BarChartIcon className="h-4 w-4" />
-                </Button>
-              </div>
-              <Tabs value={timeRange} className="w-fit" onValueChange={(v) => setTimeRange(v as any)}>
-                <TabsList>
-                  <TabsTrigger value="days">Days</TabsTrigger>
-                  <TabsTrigger value="weeks">Weeks</TabsTrigger>
-                  <TabsTrigger value="months">Months</TabsTrigger>
-                </TabsList>
-              </Tabs>
+            <div className="flex gap-4">
+              <Select value={timeRange} onValueChange={setTimeRange}>
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="Select time range" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="7d">Last 7 days</SelectItem>
+                  <SelectItem value="30d">Last 30 days</SelectItem>
+                  <SelectItem value="90d">Last 90 days</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={chartType} onValueChange={setChartType}>
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="Select chart type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="line">Line Chart</SelectItem>
+                  <SelectItem value="bar">Bar Chart</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
         </CardHeader>
-        <CardContent className="pt-4">
-          <div className="h-[400px] w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              {chartType === 'line' ? (
-                <LineChart data={analyticsData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="date" />
-                  <YAxis />
-                  <Tooltip />
-                  <Legend />
-                  <Line type="monotone" dataKey="guests" stroke="#10B981" name="Guests" />
-                  <Line type="monotone" dataKey="sleepover" stroke="#3B82F6" name="Sleepovers" />
-                  <Line type="monotone" dataKey="complaints" stroke="#F97316" name="Complaints" />
-                  <Line type="monotone" dataKey="maintenance" stroke="#8B5CF6" name="Maintenance" />
-                </LineChart>
-              ) : (
-                <BarChart data={analyticsData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="date" />
-                  <YAxis />
-                  <Tooltip />
-                  <Legend />
-                  <Bar dataKey="guests" fill="#10B981" name="Guests" />
-                  <Bar dataKey="sleepover" fill="#3B82F6" name="Sleepovers" />
-                  <Bar dataKey="complaints" fill="#F97316" name="Complaints" />
-                  <Bar dataKey="maintenance" fill="#8B5CF6" name="Maintenance" />
-                </BarChart>
-              )}
-            </ResponsiveContainer>
+        <CardContent className="pt-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="h-[300px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                {chartType === 'line' ? (
+                  <LineChart data={analyticsData}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="date" />
+                    <YAxis />
+                    <Tooltip />
+                    <Legend />
+                    <Line type="monotone" dataKey="guests" stroke="#3B82F6" name="Guests" />
+                    <Line type="monotone" dataKey="complaints" stroke="#EF4444" name="Complaints" />
+                    <Line type="monotone" dataKey="maintenance" stroke="#F59E0B" name="Maintenance" />
+                    <Line type="monotone" dataKey="sleepover" stroke="#10B981" name="Sleepovers" />
+                  </LineChart>
+                ) : (
+                  <BarChart data={analyticsData}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="date" />
+                    <YAxis />
+                    <Tooltip />
+                    <Legend />
+                    <Bar dataKey="guests" fill="#3B82F6" name="Guests" />
+                    <Bar dataKey="complaints" fill="#EF4444" name="Complaints" />
+                    <Bar dataKey="maintenance" fill="#F59E0B" name="Maintenance" />
+                    <Bar dataKey="sleepover" fill="#10B981" name="Sleepovers" />
+                  </BarChart>
+                )}
+              </ResponsiveContainer>
+            </div>
+            <div className="space-y-4">
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium">Current Statistics</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <UserPlus className="h-4 w-4 text-blue-500" />
+                        <span className="text-sm">Active Guests</span>
+                      </div>
+                      <span className="font-medium">{activeGuests.length}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <Calendar className="h-4 w-4 text-green-500" />
+                        <span className="text-sm">Active Sleepovers</span>
+                      </div>
+                      <span className="font-medium">{activeSleepoverGuests.length}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <Wrench className="h-4 w-4 text-yellow-500" />
+                        <span className="text-sm">Pending Maintenance</span>
+                      </div>
+                      <span className="font-medium">{maintenanceRequests.filter(r => r.status === 'pending').length}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <AlertCircle className="h-4 w-4 text-red-500" />
+                        <span className="text-sm">Active Complaints</span>
+                      </div>
+                      <span className="font-medium">{complaints.filter(c => c.status === 'pending').length}</span>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium">Recent Activity</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <LogOut className="h-4 w-4 text-purple-500" />
+                        <span className="text-sm">Checked Out Today</span>
+                      </div>
+                      <span className="font-medium">{checkedOutGuests.length}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <Users className="h-4 w-4 text-indigo-500" />
+                        <span className="text-sm">New Applications</span>
+                      </div>
+                      <span className="font-medium">{pendingApplications.length}</span>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -266,10 +347,10 @@ export default function AdminDashboardPage() {
                     </div>
                     <div className="text-right">
                       <p className="text-sm font-medium">
-                        {guest.status === 'active' ? 'Checked In' : 'Checked Out'}
+                        {guest.status === 'active' || guest.status === 'checked-in' ? 'Checked In' : 'Checked Out'}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        {format(new Date(guest.status === 'active' ? guest.checkInTime : guest.checkOutTime), 'PPp')}
+                        {format(new Date(guest.status === 'active' || guest.status === 'checked-in' ? guest.checkInTime : guest.checkOutTime), 'PPp')}
                       </p>
                     </div>
                   </div>
